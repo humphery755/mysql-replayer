@@ -1,1 +1,0 @@
-module github.com/humphery755/mysql-replayer/mysql

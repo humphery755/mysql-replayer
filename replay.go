@@ -6,16 +6,19 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"strings"
 	"io"
 	"sync"
 	"time"
 	"math/rand"
+	"os"
+	"strconv"
 	/*
 	"context"
-	"os"
+	
 	"os/signal"*/
 
-	"github.com/humphery755/mysql-replayer/mysql"
+	"mysql-replayer/mysql"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
@@ -45,7 +48,7 @@ var wg sync.WaitGroup
 var wg1 sync.WaitGroup
 
 func init() {
-	flag.IntVar(&transfer, "x", ":3306-127.0.0.1:3306", "use <transfer,> to specify the IPs and ports of the source and target. The format of <transfer,> could be as follow: 'sourceIP:sourcePort-targetIP:targetPort,...'. Most of the time, sourceIP could be omitted and thus <transfer,> could also be: sourcePort-targetIP:targetPort,...'.")
+	flag.StringVar(&transfer, "x", ":3306-127.0.0.1:3306", "use <transfer,> to specify the IPs and ports of the source and target. The format of <transfer,> could be as follow: 'sourceIP:sourcePort-targetIP:targetPort,...'. Most of the time, sourceIP could be omitted and thus <transfer,> could also be: sourcePort-targetIP:targetPort,...'.")
 	flag.StringVar(&username, "u", "dmdb", "username of target database")
 	flag.StringVar(&password, "p", "dmdb", "password of target database")
 	flag.StringVar(&dbname, "db", "dmdb", "db name of target database")
@@ -162,7 +165,6 @@ Retry:
 func main() {
 	flag.Parse()
 	rand.Seed(time.Now().UnixNano())
-	log.Infof("src pcap-file: %s :%s => %s:%d",sourcePcapFile,pcapPort,host,port)
 	transferList := strings.Split(transfer, "-")
 	if len(transferList) <= 1 {
 		log.Errorf("address is invalid or not set: %s", transfer)
@@ -180,7 +182,10 @@ func main() {
 		os.Exit(1)
 	}
 	host = addr[0]
-	port = addr[1]
+	port,_ = strconv.Atoi(addr[1])
+
+	log.Infof("src pcap-file: %s :%s => %s:%d",sourcePcapFile,pcapPort,host,port)
+	
 	dsn = fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8", username, password, host, port, dbname)
 	log.Infof("mysql backend: %s",dsn)
 	var handle *pcap.Handle
@@ -327,7 +332,7 @@ func handlePacket(packet gopacket.Packet) {
 }
 
 func staticWorker(wg *sync.WaitGroup, key string, ch chan []byte) {
-	wg.Add(b.concurrent)
+	wg.Add(concurrent)
 	for i := 0; i < concurrent; i++ {
 		go func() {
 			defer wg.Done()
