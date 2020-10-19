@@ -29,14 +29,12 @@ tcpdump -s 0 -i eth0 dst port 4000 and tcp -w /run/test.pcap
 ## 回放
 回放命令文档:
 ```
-mysql-replayer bench -i input-dir [-h host] [-P port] [-u user] [-p passwd] [-s speed] [-c concurrent]:
+mysql-replayer bench -i input-dir [-x <transfer,>] [-u user] [-p passwd] [-s speed] [-c concurrent]:
         Bench mysql server with data from input-dir.
-  -P string
-        port number to use for connection (default "4000")
+  -x string
+        use <transfer,> to specify the IPs and ports of the source and target. The format of <transfer,> could be as follow: 'sourceIP:sourcePort-targetIP:targetPort,...' (default ":3306-127.0.0.1:3306")
   -c int
         the bench concurrent, 0 or negative number means dynamic concurrent
-  -h string
-        connect to host (default "127.0.0.1")
   -i string
         the directory contains bench data
   -p string
@@ -46,9 +44,9 @@ mysql-replayer bench -i input-dir [-h host] [-P port] [-u user] [-p passwd] [-s 
   -u string
         user for login (default "root")
 ```
-假设上一步将pcap文件处理到目录`/tmp/test`，测试数据库用户为`root`，数据库监听本地端口`4000`，设置并发为`200`，速度为录制时实际速度的`2`倍（实测结果这个并不太准），那么实际的命令为:
+假设将上一步pcap文件放至目录`/tmp/test`，测试数据库用户为`root`，数据库监听本地端口`13306`，设置并发为`200`，速度为录制时实际速度的`2`倍（实测结果这个并不太准），那么实际的命令为:
 ```sh
-mysql-replayer bench -i /tmp/test  -c 200 -s 2 # 用户和端口由于是默认值不用填
+mysql-replayer -i /tmp/test -x ':4000-127.0.0.1:13306' -c 200 -s 2 # 用户和端口由于是默认值不用填
 ```
 如果不使用参数`-c`，它将使用默认值`0`，这表示根据录制流量时的实际情况动态调整并发（比如录制的时候为`200`过了一会儿增至`1000`，那么这里也会自动从`200`增至`1000`）
 

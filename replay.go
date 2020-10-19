@@ -9,6 +9,7 @@ import (
 	"strings"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 	"math/rand"
 	"os"
@@ -45,7 +46,6 @@ var (
 )
 
 var wg sync.WaitGroup
-var wg1 sync.WaitGroup
 
 func init() {
 	flag.StringVar(&transfer, "x", ":3306-127.0.0.1:3306", "use <transfer,> to specify the IPs and ports of the source and target. The format of <transfer,> could be as follow: 'sourceIP:sourcePort-targetIP:targetPort,...'. Most of the time, sourceIP could be omitted and thus <transfer,> could also be: sourcePort-targetIP:targetPort,...'.")
@@ -54,7 +54,7 @@ func init() {
 	flag.StringVar(&dbname, "db", "dmdb", "db name of target database")
 	flag.StringVar(&sourcePcapFile, "i", "./147.pcap", "input-dir of source pcap files")
 	flag.IntVar(&speed, "s", 1, "the bench speed")
-	flag.IntVar(&concurrent, "c", 0, "the bench concurrent, 0 or negative number means dynamic concurrent")
+	flag.IntVar(&concurrent, "c", 1, "the bench concurrent")
 }
 
 func mysql_packet_extract_sql(raw_packet []byte) string {
@@ -99,7 +99,7 @@ func worker_for_some_ip(key string, ch chan []byte) {
 	var seq_id byte = 0
 	var stmt_id uint32 = 0
 	var cmd byte
-
+	
 Retry:
 	mysqlConn, err := mysql.Open(dsn)
 	if err != nil {
@@ -118,7 +118,7 @@ Retry:
 				log.Infof("workder %s done", key)
 				return
 			}
-
+			
 			packet = mysql_packet_set_seq_id(packet, seq_id)
 			cmd = mysql_packet_get_cmd(packet)
 
@@ -146,7 +146,7 @@ Retry:
 			buf := make([]byte, 65535)
 			n, err = mysqlConn.NetConn.Read(buf)
 			for  err != nil {
-                        	log.Errorf("unkown %s", err)
+                log.Errorf("unkown %s", err)
 				return
 			}
 			if cmd == mysql.COM_STMT_PREPARE {
@@ -158,6 +158,7 @@ Retry:
 					log.Errorf("prepare stmt error. packet => %s", string(buf[13:]))
 				}
 			}
+			atomic.AddInt64(&qcount, 1)
 		}
 	}
 }
@@ -204,6 +205,8 @@ func main() {
 	}
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 
+	start := int64(time.Now().Unix())
+
 	for packet := range packetSource.Packets() {
 		handlePacket(packet)
 	}
@@ -232,6 +235,15 @@ func main() {
 
 	//os.Exit(int(subcommands.Execute(ctx)))
 	*/
+	end := int64(time.Now().Unix())
+	delta := end - start
+
+	// Avoid integer divide by zero
+	if delta == 0 {
+		delta = 1
+	}
+	count := atomic.LoadInt64(&qcount)
+	fmt.Printf("Process %d request in %d seconds, QPS: %d\n", count, end-start, count/delta)
 	
 	log.Info("end play!!")
 }
@@ -323,20 +335,18 @@ func handlePacket(packet gopacket.Packet) {
 			ch <- data
 		} else {
 			new_ch := make(chan []byte, 102400)
-			go worker_for_some_ip(key, new_ch)
-			//go staticWorker(&wg1,key, new_ch)
+			//go worker_for_some_ip(key, new_ch)
+			staticWorker(key, new_ch)
 			workers[key] = new_ch
 			new_ch <- data
 		}
 	}
 }
 
-func staticWorker(wg *sync.WaitGroup, key string, ch chan []byte) {
-	wg.Add(concurrent)
+func staticWorker(key string, ch chan []byte) {
 	for i := 0; i < concurrent; i++ {
 		go func() {
-			defer wg.Done()
-			go worker_for_some_ip(key, ch)
+			worker_for_some_ip(key, ch)
 		}()
 	}
 }
