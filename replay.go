@@ -15,7 +15,7 @@ import (
 	"os"
 	"os/signal"*/
 
-	"github.com/humphery755/mysql-replay/mysql"
+	"github.com/humphery755/mysql-replayer/mysql"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
@@ -23,6 +23,7 @@ import (
 )
 
 var (
+	transfer	   string
 	username       string
 	password       string
 	host           string
@@ -30,6 +31,9 @@ var (
 	pcapPort        string
 	dbname         string
 	sourcePcapFile string
+	speed      int
+	concurrent int
+	qcount     int64
 
 	workers        map[string]chan []byte
 	reassemble_map map[string][]byte
@@ -38,15 +42,16 @@ var (
 )
 
 var wg sync.WaitGroup
+var wg1 sync.WaitGroup
 
 func init() {
-	flag.StringVar(&host, "host", "172.20.11.106", "host of target database")
-	flag.IntVar(&port, "port", 8865, "port of target database")
-	flag.StringVar(&pcapPort, "pcapPort", "3306", "db port of source pcap file")
-	flag.StringVar(&username, "username", "dmdb", "username of target database")
-	flag.StringVar(&password, "password", "dmdb", "password of target database")
-	flag.StringVar(&dbname, "dbname", "dmdb", "db name of target database")
-	flag.StringVar(&sourcePcapFile, "pcap-file", "./147.pcap", "path of source pcap file")
+	flag.IntVar(&transfer, "x", ":3306-127.0.0.1:3306", "use <transfer,> to specify the IPs and ports of the source and target. The format of <transfer,> could be as follow: 'sourceIP:sourcePort-targetIP:targetPort,...'. Most of the time, sourceIP could be omitted and thus <transfer,> could also be: sourcePort-targetIP:targetPort,...'.")
+	flag.StringVar(&username, "u", "dmdb", "username of target database")
+	flag.StringVar(&password, "p", "dmdb", "password of target database")
+	flag.StringVar(&dbname, "db", "dmdb", "db name of target database")
+	flag.StringVar(&sourcePcapFile, "i", "./147.pcap", "input-dir of source pcap files")
+	flag.IntVar(&speed, "s", 1, "the bench speed")
+	flag.IntVar(&concurrent, "c", 0, "the bench concurrent, 0 or negative number means dynamic concurrent")
 }
 
 func mysql_packet_extract_sql(raw_packet []byte) string {
@@ -158,6 +163,24 @@ func main() {
 	flag.Parse()
 	rand.Seed(time.Now().UnixNano())
 	log.Infof("src pcap-file: %s :%s => %s:%d",sourcePcapFile,pcapPort,host,port)
+	transferList := strings.Split(transfer, "-")
+	if len(transferList) <= 1 {
+		log.Errorf("address is invalid or not set: %s", transfer)
+		os.Exit(1)
+	}
+	addr := strings.Split(transferList[0], ":")
+	if len(addr) <= 1 {
+		log.Errorf("src address is invalid or not set: %s", transferList[0])
+		os.Exit(1)
+	}
+	pcapPort = addr[1]
+	addr = strings.Split(transferList[1], ":")
+	if len(addr) <= 1 {
+		log.Errorf("dst address is invalid or not set: %s", transferList[1])
+		os.Exit(1)
+	}
+	host = addr[0]
+	port = addr[1]
 	dsn = fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8", username, password, host, port, dbname)
 	log.Infof("mysql backend: %s",dsn)
 	var handle *pcap.Handle
@@ -296,8 +319,19 @@ func handlePacket(packet gopacket.Packet) {
 		} else {
 			new_ch := make(chan []byte, 102400)
 			go worker_for_some_ip(key, new_ch)
+			//go staticWorker(&wg1,key, new_ch)
 			workers[key] = new_ch
 			new_ch <- data
 		}
+	}
+}
+
+func staticWorker(wg *sync.WaitGroup, key string, ch chan []byte) {
+	wg.Add(b.concurrent)
+	for i := 0; i < concurrent; i++ {
+		go func() {
+			defer wg.Done()
+			go worker_for_some_ip(key, ch)
+		}()
 	}
 }
