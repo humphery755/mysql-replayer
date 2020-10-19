@@ -1,1 +1,1 @@
-module mysql-replayer/mysql
+module github.com/humphery755/mysql-replayer/mysql
